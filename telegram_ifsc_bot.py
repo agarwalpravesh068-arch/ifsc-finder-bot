@@ -18,36 +18,37 @@ from telegram.ext import (
 )
 from flask import Flask
 
-# 🔑 Load environment variables
-load_dotenv()
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-
-if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN not found (check .env or Render Environment Variables)")
-if not RENDER_EXTERNAL_HOSTNAME:
-    raise ValueError("❌ RENDER_EXTERNAL_HOSTNAME not found in environment variables")
-
-print("✅ Loaded TELEGRAM_TOKEN:", TELEGRAM_TOKEN[:8] + "..." if TELEGRAM_TOKEN else "None")
-
-# Conversation states
-STATE, BANK, BRANCH = range(3)
-
-# Enable logging
+# ------------------ Logging ------------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# ================== CSV Loading ==================
+# ------------------ Env Vars ------------------
+load_dotenv()
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
+
+if not TELEGRAM_TOKEN:
+    raise ValueError("❌ TELEGRAM_TOKEN missing (check Render env)")
+if not RENDER_EXTERNAL_HOSTNAME:
+    raise ValueError("❌ RENDER_EXTERNAL_HOSTNAME missing (check Render env)")
+
+logger.info(f"✅ TELEGRAM_TOKEN loaded: {TELEGRAM_TOKEN[:8]}...")
+logger.info(f"✅ RENDER_EXTERNAL_HOSTNAME: {RENDER_EXTERNAL_HOSTNAME}")
+
+# Conversation states
+STATE, BANK, BRANCH = range(3)
+
+# ------------------ CSV Cache ------------------
 CSV_FILE = "ifsc.csv"
 cached_df = None
 
 def detect_encoding(file_path):
     with open(file_path, "rb") as f:
         result = chardet.detect(f.read())
-    logger.info(f"✅ Detected Encoding: {result['encoding']}")
+    logger.info(f"✅ CSV Encoding: {result['encoding']}")
     return result["encoding"]
 
 def load_csv():
@@ -55,115 +56,105 @@ def load_csv():
     if cached_df is None:
         encoding = detect_encoding(CSV_FILE)
         cached_df = pd.read_csv(CSV_FILE, encoding=encoding)
-        logger.info(f"✅ CSV Loaded, total rows = {len(cached_df)}")
-
+        logger.info(f"✅ CSV Loaded, rows = {len(cached_df)}")
         cached_df["State"] = cached_df["State"].astype(str).str.strip()
         cached_df["Bank"] = cached_df["Bank"].astype(str).str.strip()
         cached_df["Branch"] = cached_df["Branch"].astype(str).str.strip()
     return cached_df
 
-# ================== Search ==================
+# ------------------ Search ------------------
 def search_ifsc(state, bank, branch):
     df = load_csv()
-    state_lower = state.strip().lower()
-    bank_lower = bank.strip().lower()
-    branch_lower = branch.strip().lower()
+    state_lower, bank_lower, branch_lower = state.lower(), bank.lower(), branch.lower()
 
-    # ✅ Exact Match
-    exact_result = df[
+    exact = df[
         (df["State"].str.lower() == state_lower) &
         (df["Bank"].str.lower() == bank_lower) &
         (df["Branch"].str.lower() == branch_lower)
     ]
-    if not exact_result.empty:
-        return exact_result, None
+    if not exact.empty:
+        return exact, None
 
-    # ✅ Fuzzy Suggestions (Branch only)
-    branches = df[(df["State"].str.lower() == state_lower) & (df["Bank"].str.lower() == bank_lower)]["Branch"].str.lower().tolist()
+    branches = df[
+        (df["State"].str.lower() == state_lower) &
+        (df["Bank"].str.lower() == bank_lower)
+    ]["Branch"].str.lower().tolist()
     suggestions = difflib.get_close_matches(branch_lower, branches, n=3, cutoff=0.4)
 
-    # ✅ Partial Match fallback
-    filtered_df = df[
+    partial = df[
         (df["State"].str.lower() == state_lower) &
         (df["Bank"].str.lower() == bank_lower) &
         (df["Branch"].str.lower().str.contains(branch_lower, na=False))
     ]
-    return filtered_df, suggestions
+    return partial, suggestions
 
-# ================== Log Queries ==================
+# ------------------ Log Queries ------------------
 def log_query(user, state, bank, branch, result_count):
-    log_data = {
+    data = {
         "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "user_id": user.id,
         "username": user.username,
         "name": f"{user.first_name or ''} {user.last_name or ''}".strip(),
-        "state": state,
-        "bank": bank,
-        "branch": branch,
+        "state": state, "bank": bank, "branch": branch,
         "results": result_count
     }
-    df_log = pd.DataFrame([log_data])
-    log_file = "queries_log.csv"
-    df_log.to_csv(log_file, mode="a", header=not os.path.exists(log_file), index=False)
-    logger.info(f"📝 Query Logged: {log_data}")
+    pd.DataFrame([data]).to_csv("queries_log.csv", mode="a", header=not os.path.exists("queries_log.csv"), index=False)
+    logger.info(f"📝 Query: {data}")
 
-# ================== Commands ==================
+# ------------------ Bot Handlers ------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("➡️ /start command received")
     await update.message.reply_text(
         "👋 Welcome to *IFSC Finder | PMetroMart*!\n\n"
         "कृपया अपना *State* लिखें:\n\n"
-        "🌐 Visit our website: [PMetroMart IFSC Portal](https://pmetromart.in/ifsc/)",
+        "🌐 Visit: [PMetroMart IFSC](https://pmetromart.in/ifsc/)",
         parse_mode="Markdown"
     )
     return STATE
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("➡️ /help command received")
     await update.message.reply_text(
-        "ℹ️ *IFSC Finder Bot Help*\n\n"
+        "ℹ️ *IFSC Finder Help*\n\n"
         "1️⃣ /start - Bot शुरू करें\n"
-        "2️⃣ State भेजें (जैसे: Delhi)\n"
-        "3️⃣ Bank भेजें (जैसे: SBI)\n"
-        "4️⃣ Branch भेजें (जैसे: Connaught)\n"
-        "➡️ फिर Bot आपको IFSC details देगा।\n\n"
-        "🌐 Visit website: [PMetroMart IFSC](https://pmetromart.in/ifsc/)",
+        "2️⃣ State भेजें → Bank → Branch\n"
+        "➡️ फिर Bot आपको IFSC देगा।\n\n"
+        "🌐 Website: [PMetroMart IFSC](https://pmetromart.in/ifsc/)",
         parse_mode="Markdown"
     )
 
-# ✅ Hi / Hello Handler
 async def greet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("➡️ Greeting detected")
     return await start(update, context)
 
 async def get_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_state = update.message.text.strip()
-    context.user_data["state"] = user_state
-    logger.info(f"DEBUG: User Input -> State={user_state}")
-    await update.message.reply_text("✅ State मिल गया!\nअब कृपया *Bank* का नाम भेजें:", parse_mode="Markdown")
+    state = update.message.text.strip()
+    context.user_data["state"] = state
+    logger.info(f"✅ State={state}")
+    await update.message.reply_text("✅ State मिला! अब *Bank* का नाम भेजें:", parse_mode="Markdown")
     return BANK
 
 async def get_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_bank = update.message.text.strip()
-    context.user_data["bank"] = user_bank
-    logger.info(f"DEBUG: User Input -> Bank={user_bank}, State={context.user_data.get('state')}")
-    await update.message.reply_text("✅ Bank मिल गया!\nअब कृपया Branch का नाम भेजें:")
+    bank = update.message.text.strip()
+    context.user_data["bank"] = bank
+    logger.info(f"✅ Bank={bank}, State={context.user_data.get('state')}")
+    await update.message.reply_text("✅ Bank मिला! अब Branch का नाम भेजें:")
     return BRANCH
 
 async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_branch = update.message.text.strip()
-    state = context.user_data.get("state")
-    bank = context.user_data.get("bank")
-    logger.info(f"DEBUG: User Input -> Branch={user_branch}, Bank={bank}, State={state}")
+    branch = update.message.text.strip()
+    state, bank = context.user_data.get("state"), context.user_data.get("bank")
+    logger.info(f"➡️ Branch={branch}, Bank={bank}, State={state}")
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
-    async def process_query():
-        df, suggestions = search_ifsc(state, bank, user_branch)
-        log_query(update.message.from_user, state, bank, user_branch, len(df))
+    async def process():
+        df, suggestions = search_ifsc(state, bank, branch)
+        log_query(update.message.from_user, state, bank, branch, len(df))
 
         if df.empty:
             if suggestions:
-                await update.message.reply_text(
-                    f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}"
-                )
+                await update.message.reply_text(f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}")
             else:
                 await update.message.reply_text("❌ कोई result नहीं मिला।\nकृपया सही State/Bank/Branch नाम डालें।")
         else:
@@ -179,36 +170,34 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"📞 *Contact:* {row['Contact']}"
                 )
                 await update.message.reply_text(msg, parse_mode="Markdown")
-
-            await update.message.reply_text(
-                "✅ Search पूरा हुआ।\nफिर से शुरू करने के लिए /start दबाएँ।",
-                parse_mode="Markdown"
-            )
+            await update.message.reply_text("✅ Search पूरा हुआ।\n/start से दोबारा शुरू करें।", parse_mode="Markdown")
 
     try:
-        await asyncio.wait_for(process_query(), timeout=25)
+        await asyncio.wait_for(process(), timeout=25)
     except asyncio.TimeoutError:
+        logger.error("⚠️ Timeout error in branch search")
         await update.message.reply_text(
-            "⌛ Result लोड होने में दिक्कत आ रही है।\n👉 Aap hamari website par bhi check kar sakte hai:\n\n"
-            "[IFSC Finder](https://pmetromart.in/ifsc/)",
+            "⌛ Result delay हो गया।\n👉 हमारी website देख सकते हैं:\n[IFSC Finder](https://pmetromart.in/ifsc/)",
             parse_mode="Markdown"
         )
 
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("❌ Conversation cancelled")
     await update.message.reply_text("❌ Operation cancel कर दिया गया।")
     return ConversationHandler.END
 
-# ================== Flask App for Render ==================
+# ------------------ Flask for Render ------------------
 app = Flask(__name__)
 
 @app.route("/")
 def home():
-    return "✅ IFSC Finder Bot is running!", 200
+    return "✅ IFSC Finder Bot running!", 200
 
-# ================== Main ==================
+# ------------------ Main ------------------
 def main():
+    logger.info("🚀 Starting bot...")
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     conv_handler = ConversationHandler(
@@ -219,30 +208,25 @@ def main():
             BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        conversation_timeout=60
+        conversation_timeout=60,
     )
-
     application.add_handler(conv_handler)
     application.add_handler(CommandHandler("help", help_command))
-
-    greet_handler = MessageHandler(
-        filters.Regex(r'^(hi|hello|hii|hey|namaste)$') & ~filters.COMMAND,
-        greet_user
+    application.add_handler(
+        MessageHandler(filters.Regex(r'^(hi|hello|hey|namaste)$') & ~filters.COMMAND, greet_user)
     )
-    application.add_handler(greet_handler)
 
     PORT = int(os.environ.get("PORT", 10000))
+    webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
+
+    logger.info(f"🌍 Setting webhook at {webhook_url}")
+
     application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        url_path=TELEGRAM_TOKEN
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=webhook_url,
     )
-    # ✅ अब अलग से webhook set करना होगा
-    application.bot.set_webhook(
-        url=f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
-    )
-
-    logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}")
 
 if __name__ == "__main__":
     main()
