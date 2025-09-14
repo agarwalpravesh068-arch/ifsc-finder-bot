@@ -189,7 +189,7 @@ def timeout_handler(update: Update, context: CallbackContext):
     )
     return ConversationHandler.END
 
-# ================== Main Function ==================
+# ================== Main Function (Webhook Only) ==================
 def main():
     updater = Updater(TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
