@@ -5,7 +5,6 @@ import difflib
 import os
 import asyncio
 from dotenv import load_dotenv
-from datetime import datetime
 from flask import Flask, request
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
@@ -164,7 +163,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-# ------------------ Main with Flask ------------------
+# ------------------ Flask + PTB ------------------
 app = Flask(__name__)
 application = Application.builder().token(TELEGRAM_TOKEN).build()
 
@@ -193,8 +192,15 @@ async def webhook():
     await application.process_update(update)
     return "OK", 200
 
+async def run_bot():
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+
 def main():
     PORT = int(os.environ.get("PORT", 10000))
+    loop = asyncio.get_event_loop()
+    loop.create_task(run_bot())
     app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
