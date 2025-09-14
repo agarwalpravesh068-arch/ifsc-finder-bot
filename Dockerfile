@@ -1,15 +1,20 @@
-# Python 3.11 base image
+# ✅ Official Python 3.11 image use करो
 FROM python:3.11-slim
 
-# Set working directory
+# Working directory set करो
 WORKDIR /app
 
-# Copy requirements.txt and install dependencies
+# Dependencies install करने से पहले system update
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements file and install dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy all files to container
+# Copy बाकी का project
 COPY . .
 
-# Run the bot
+# Start the bot
 CMD ["python", "telegram_ifsc_bot.py"]
