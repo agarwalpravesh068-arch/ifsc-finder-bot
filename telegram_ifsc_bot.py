@@ -8,8 +8,12 @@ from datetime import datetime
 from telegram import Update
 from telegram.constants import ChatAction
 from telegram.ext import (
-    Updater, CommandHandler, MessageHandler, Filters,
-    CallbackContext, ConversationHandler
+    Application,
+    CommandHandler,
+    MessageHandler,
+    ContextTypes,
+    ConversationHandler,
+    filters,
 )
 from flask import Flask
 
@@ -35,7 +39,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ================== CSV Loading (Cache + Pre-Indexing) ==================
+# ================== CSV Loading ==================
 CSV_FILE = "ifsc.csv"
 cached_df = None
 state_branch_index = {}
@@ -64,13 +68,13 @@ def load_and_index_csv():
 
     return cached_df
 
-# ================== Search Function ==================
+# ================== Search ==================
 def search_ifsc(state, branch):
     df = load_and_index_csv()
     state_lower = state.lower().strip()
     branch_lower = branch.lower().strip()
 
-    # ✅ Exact Match First
+    # ✅ Exact Match
     exact_result = df[
         (df["State"].str.lower() == state_lower) &
         (df["Branch"].str.lower() == branch_lower)
@@ -111,8 +115,8 @@ def log_query(user, state, branch, result_count):
     logger.info(f"📝 Query Logged: {log_data}")
 
 # ================== Commands ==================
-def start(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "👋 Welcome to *IFSC Finder | PMetroMart*!\n\n"
         "कृपया अपना State लिखें:\n\n"
         "🌐 Visit our website: [PMetroMart IFSC Portal](https://pmetromart.in/ifsc/)",
@@ -120,8 +124,8 @@ def start(update: Update, context: CallbackContext):
     )
     return STATE
 
-def help_command(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "ℹ️ *IFSC Finder Bot Help*\n\n"
         "1️⃣ /start - Bot शुरू करें\n"
         "2️⃣ State भेजें (जैसे: Delhi)\n"
@@ -132,23 +136,23 @@ def help_command(update: Update, context: CallbackContext):
     )
 
 # ✅ Hi / Hello Handler
-def greet_user(update: Update, context: CallbackContext):
-    return start(update, context)
+async def greet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    return await start(update, context)
 
-def get_state(update: Update, context: CallbackContext):
+async def get_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state = update.message.text.strip()
     context.user_data["state"] = user_state
     logger.info(f"DEBUG: User Input -> State={user_state}")
-    update.message.reply_text("✅ State मिल गया!\nअब कृपया Branch का नाम भेजें:")
+    await update.message.reply_text("✅ State मिल गया!\nअब कृपया Branch का नाम भेजें:")
     return BRANCH
 
-def get_branch(update: Update, context: CallbackContext):
+async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_branch = update.message.text.strip()
     state = context.user_data.get("state")
     logger.info(f"DEBUG: User Input -> Branch={user_branch}, State={state}")
 
-    # Typing action दिखाना
-    context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+    # Typing action
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
     df, suggestions = search_ifsc(state, user_branch)
 
@@ -157,11 +161,11 @@ def get_branch(update: Update, context: CallbackContext):
 
     if df.empty:
         if suggestions:
-            update.message.reply_text(
+            await update.message.reply_text(
                 f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}"
             )
         else:
-            update.message.reply_text("❌ कोई result नहीं मिला।\nकृपया सही State/Branch नाम डालें।")
+            await update.message.reply_text("❌ कोई result नहीं मिला।\nकृपया सही State/Branch नाम डालें।")
     else:
         for _, row in df.iterrows():
             msg = (
@@ -174,9 +178,9 @@ def get_branch(update: Update, context: CallbackContext):
                 f"💳 *MICR:* {row['MICR']}\n"
                 f"📞 *Contact:* {row['Contact']}"
             )
-            update.message.reply_text(msg, parse_mode="Markdown")
+            await update.message.reply_text(msg, parse_mode="Markdown")
 
-        update.message.reply_text(
+        await update.message.reply_text(
             "✅ Search पूरा हुआ।\nफिर से शुरू करने के लिए /start दबाएँ।\n\n"
             "🌐 More info: [PMetroMart IFSC Portal](https://pmetromart.in/ifsc/)",
             parse_mode="Markdown"
@@ -184,13 +188,13 @@ def get_branch(update: Update, context: CallbackContext):
 
     return ConversationHandler.END
 
-def cancel(update: Update, context: CallbackContext):
-    update.message.reply_text("❌ Operation cancel कर दिया गया।")
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("❌ Operation cancel कर दिया गया।")
     return ConversationHandler.END
 
 # ✅ Timeout Handler
-def timeout_handler(update: Update, context: CallbackContext):
-    update.message.reply_text(
+async def timeout_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
         "⌛ समय समाप्त!\nहमको आपका जवाब नहीं मिला।\nकृपया /start से फिर से कोशिश करें।"
     )
     return ConversationHandler.END
@@ -202,33 +206,32 @@ app = Flask(__name__)
 def home():
     return "✅ IFSC Finder Bot is running!", 200
 
-# ================== Main Function ==================
+# ================== Main ==================
 def main():
-    updater = Updater(TELEGRAM_TOKEN, use_context=True)
-    dp = updater.dispatcher
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
-            STATE: [MessageHandler(Filters.text & ~Filters.command, get_state)],
-            BRANCH: [MessageHandler(Filters.text & ~Filters.command, get_branch)],
+            STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_state)],
+            BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         conversation_timeout=60
     )
 
-    dp.add_handler(conv_handler)
-    dp.add_handler(CommandHandler("help", help_command))
+    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("help", help_command))
 
     greet_handler = MessageHandler(
-        Filters.regex(r'^(hi|hello|hii|hey|namaste)$') & ~Filters.command,
+        filters.Regex(r'^(hi|hello|hii|hey|namaste)$') & ~filters.COMMAND,
         greet_user
     )
-    dp.add_handler(greet_handler)
+    application.add_handler(greet_handler)
 
     # ✅ Webhook mode for Render
     PORT = int(os.environ.get("PORT", 10000))
-    updater.start_webhook(
+    application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
         url_path=TELEGRAM_TOKEN,
@@ -236,9 +239,6 @@ def main():
     )
 
     logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}")
-
-    # 🚑 Run Flask healthcheck app
-    app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
     main()
