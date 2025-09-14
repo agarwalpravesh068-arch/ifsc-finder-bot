@@ -1,11 +1,10 @@
 services:
-  - type: web
+  - type: worker
     name: ifsc-finder-bot
     env: python
     plan: free
     buildCommand: ""
     startCommand: python telegram_ifsc_bot.py
     envVars:
-      - key: BOT_TOKEN
-        sync: false
-    runtime: python-3.11.9
+      - key: PYTHON_VERSION
+        value: 3.11
