@@ -57,27 +57,33 @@ def load_and_index_csv():
         cached_df = pd.read_csv(CSV_FILE, encoding=encoding)
         logger.info(f"✅ CSV Loaded, total rows = {len(cached_df)}")
 
+        # Normalize important columns
+        cached_df["State"] = cached_df["State"].astype(str).str.strip()
+        cached_df["Branch"] = cached_df["Branch"].astype(str).str.strip()
+
         # Pre-indexing (State → Branches)
         state_branch_index = {}
         for _, row in cached_df.iterrows():
-            state = str(row["State"]).strip().lower()
-            branch = str(row["Branch"]).strip().lower()
+            state = row["State"].strip().lower()
+            branch = row["Branch"].strip().lower()
             if state not in state_branch_index:
                 state_branch_index[state] = set()
             state_branch_index[state].add(branch)
+
+        logger.info(f"📌 States indexed: {list(state_branch_index.keys())[:10]} ...")
 
     return cached_df
 
 # ================== Search ==================
 def search_ifsc(state, branch):
     df = load_and_index_csv()
-    state_lower = state.lower().strip()
-    branch_lower = branch.lower().strip()
+    state_lower = state.strip().lower()
+    branch_lower = branch.strip().lower()
 
-    # ✅ Exact Match First
+    # ✅ Exact Match
     exact_result = df[
-        (df["State"].str.lower() == state_lower) &
-        (df["Branch"].str.lower() == branch_lower)
+        (df["State"].str.strip().str.lower() == state_lower) &
+        (df["Branch"].str.strip().str.lower() == branch_lower)
     ]
     if not exact_result.empty:
         logger.info(f"✅ Exact match found: {len(exact_result)} rows")
@@ -87,21 +93,17 @@ def search_ifsc(state, branch):
     suggestions = []
     if state_lower in state_branch_index:
         all_branches = list(state_branch_index[state_lower])
-        matches = difflib.get_close_matches(branch_lower, all_branches, n=3, cutoff=0.3)
+        logger.info(f"📌 Available branches in {state}: {all_branches[:10]} ...")
+        matches = difflib.get_close_matches(branch_lower, all_branches, n=3, cutoff=0.4)
         logger.info(f"🔍 Fuzzy suggestions for '{branch}': {matches}")
         if matches:
             suggestions = matches
 
-    # ✅ Partial Match (contains)
+    # ✅ Partial Match fallback
     filtered_df = df[
-        (df["State"].str.lower() == state_lower) &
-        (df["Branch"].str.contains(branch_lower, case=False, na=False))
+        (df["State"].str.strip().str.lower() == state_lower) &
+        (df["Branch"].str.lower().str.contains(branch_lower, na=False))
     ]
-
-    # अगर partial match empty है लेकिन suggestions मिले हैं → सिर्फ suggestions return करो
-    if filtered_df.empty and suggestions:
-        return pd.DataFrame(), suggestions
-
     return filtered_df, suggestions
 
 # ================== Log Queries ==================
