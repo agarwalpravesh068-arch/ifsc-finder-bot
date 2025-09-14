@@ -3,10 +3,6 @@
 services:
   - type: web
     name: ifsc-finder-bot
-    env: python
+    env: docker
     plan: free
-    buildCommand: ""
-    startCommand: python telegram_ifsc_bot.py
-    envVars:
-      - key: PYTHON_VERSION
-        value: 3.11.9
+    dockerfilePath: ./Dockerfile
