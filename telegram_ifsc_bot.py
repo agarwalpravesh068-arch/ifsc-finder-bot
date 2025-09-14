@@ -232,14 +232,15 @@ def main():
     application.add_handler(greet_handler)
 
     PORT = int(os.environ.get("PORT", 10000))
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TELEGRAM_TOKEN,
-        webhook_url=f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
-    )
+    # सही webhook सेटिंग
+application.run_webhook(
+    listen="0.0.0.0",
+    port=PORT,
+    url_path=f"{TELEGRAM_TOKEN}",   # token URL path के रूप में रहेगा
+    webhook_url=f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
+)
 
-    logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}")
+logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}")
 
 if __name__ == "__main__":
     main()
