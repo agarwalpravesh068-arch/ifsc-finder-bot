@@ -16,7 +16,9 @@ load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 
 if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN not found in .env file")
+    raise ValueError("❌ TELEGRAM_TOKEN not found (check .env file or Render Environment Variables)")
+print("✅ Loaded TELEGRAM_TOKEN:", TELEGRAM_TOKEN[:8] + "..." if TELEGRAM_TOKEN else "None")
+
 
 # Conversation states
 STATE, BRANCH = range(2)
