@@ -19,7 +19,6 @@ if not TELEGRAM_TOKEN:
     raise ValueError("❌ TELEGRAM_TOKEN not found (check .env file or Render Environment Variables)")
 print("✅ Loaded TELEGRAM_TOKEN:", TELEGRAM_TOKEN[:8] + "..." if TELEGRAM_TOKEN else "None")
 
-
 # Conversation states
 STATE, BRANCH = range(2)
 
@@ -202,21 +201,33 @@ def main():
             BRANCH: [MessageHandler(Filters.text & ~Filters.command, get_branch)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        conversation_timeout=60  # 1 min timeout
+        conversation_timeout=60
     )
 
     dp.add_handler(conv_handler)
     dp.add_handler(CommandHandler("help", help_command))
 
-    # hi/hello greet handler
     greet_handler = MessageHandler(
         Filters.regex(r'^(hi|hello|hii|hey|namaste)$') & ~Filters.command,
         greet_user
     )
     dp.add_handler(greet_handler)
 
-    updater.start_polling()
-    logger.info("✅ Bot started and polling Telegram...")
+    # ✅ Webhook mode (for Render)
+    PORT = int(os.environ.get("PORT", 10000))
+    RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+
+    if not RENDER_EXTERNAL_HOSTNAME:
+        raise ValueError("❌ RENDER_EXTERNAL_HOSTNAME not found in environment variables")
+
+    updater.start_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
+    )
+
+    logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}")
     updater.idle()
 
 if __name__ == "__main__":
