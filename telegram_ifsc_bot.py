@@ -10,13 +10,18 @@ from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters,
     CallbackContext, ConversationHandler
 )
+from flask import Flask
 
 # 🔑 Load environment variables
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 
 if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN not found (check .env file or Render Environment Variables)")
+    raise ValueError("❌ TELEGRAM_TOKEN not found (check .env or Render Environment Variables)")
+if not RENDER_EXTERNAL_HOSTNAME:
+    raise ValueError("❌ RENDER_EXTERNAL_HOSTNAME not found in environment variables")
+
 print("✅ Loaded TELEGRAM_TOKEN:", TELEGRAM_TOKEN[:8] + "..." if TELEGRAM_TOKEN else "None")
 
 # Conversation states
@@ -189,7 +194,14 @@ def timeout_handler(update: Update, context: CallbackContext):
     )
     return ConversationHandler.END
 
-# ================== Main Function (Webhook Only) ==================
+# ================== Flask App for Render ==================
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "✅ IFSC Finder Bot is running!", 200
+
+# ================== Main Function ==================
 def main():
     updater = Updater(TELEGRAM_TOKEN, use_context=True)
     dp = updater.dispatcher
@@ -213,13 +225,8 @@ def main():
     )
     dp.add_handler(greet_handler)
 
-    # ✅ Webhook mode (for Render)
+    # ✅ Webhook mode for Render
     PORT = int(os.environ.get("PORT", 10000))
-    RENDER_EXTERNAL_HOSTNAME = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
-
-    if not RENDER_EXTERNAL_HOSTNAME:
-        raise ValueError("❌ RENDER_EXTERNAL_HOSTNAME not found in environment variables")
-
     updater.start_webhook(
         listen="0.0.0.0",
         port=PORT,
@@ -228,7 +235,9 @@ def main():
     )
 
     logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}")
-    updater.idle()
+
+    # 🚑 Run Flask healthcheck app
+    app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
     main()
