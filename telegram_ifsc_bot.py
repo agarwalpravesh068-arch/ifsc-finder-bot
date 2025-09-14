@@ -79,7 +79,10 @@ def search_ifsc(state, bank, branch):
         return exact_result, None
 
     # ✅ Fuzzy Suggestions (Branch only)
-    branches = df[(df["State"].str.lower() == state_lower) & (df["Bank"].str.lower() == bank_lower)]["Branch"].str.lower().tolist()
+    branches = df[
+        (df["State"].str.lower() == state_lower) &
+        (df["Bank"].str.lower() == bank_lower)
+    ]["Branch"].str.lower().tolist()
     suggestions = difflib.get_close_matches(branch_lower, branches, n=3, cutoff=0.4)
 
     # ✅ Partial Match fallback
@@ -134,6 +137,9 @@ async def greet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await start(update, context)
 
 async def get_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        await update.message.reply_text("❌ Invalid input, कृपया सही State भेजें।")
+        return STATE
     user_state = update.message.text.strip()
     context.user_data["state"] = user_state
     logger.info(f"DEBUG: User Input -> State={user_state}")
@@ -141,6 +147,9 @@ async def get_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return BANK
 
 async def get_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        await update.message.reply_text("❌ Invalid input, कृपया सही Bank भेजें।")
+        return BANK
     user_bank = update.message.text.strip()
     context.user_data["bank"] = user_bank
     logger.info(f"DEBUG: User Input -> Bank={user_bank}, State={context.user_data.get('state')}")
@@ -148,6 +157,9 @@ async def get_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return BRANCH
 
 async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.text:
+        await update.message.reply_text("❌ Invalid input, कृपया सही Branch भेजें।")
+        return BRANCH
     user_branch = update.message.text.strip()
     state = context.user_data.get("state")
     bank = context.user_data.get("bank")
@@ -200,6 +212,13 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operation cancel कर दिया गया।")
     return ConversationHandler.END
 
+# ================== Flask App for Render ==================
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "✅ IFSC Finder Bot is running!", 200
+
 # ================== Main ==================
 def main():
     application = Application.builder().token(TELEGRAM_TOKEN).build()
@@ -212,7 +231,8 @@ def main():
             BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        conversation_timeout=60
+        allow_reentry=True,  # ✅ Fix: allow re-entry in conversation
+        conversation_timeout=120
     )
 
     application.add_handler(conv_handler)
@@ -225,7 +245,6 @@ def main():
     application.add_handler(greet_handler)
 
     PORT = int(os.environ.get("PORT", 10000))
-
     application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
@@ -233,6 +252,7 @@ def main():
         webhook_url=f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
     )
 
-    logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}")
+    logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}")
+
 if __name__ == "__main__":
     main()
