@@ -79,10 +79,7 @@ def search_ifsc(state, bank, branch):
         return exact_result, None
 
     # ✅ Fuzzy Suggestions (Branch only)
-    branches = df[
-        (df["State"].str.lower() == state_lower) &
-        (df["Bank"].str.lower() == bank_lower)
-    ]["Branch"].str.lower().tolist()
+    branches = df[(df["State"].str.lower() == state_lower) & (df["Bank"].str.lower() == bank_lower)]["Branch"].str.lower().tolist()
     suggestions = difflib.get_close_matches(branch_lower, branches, n=3, cutoff=0.4)
 
     # ✅ Partial Match fallback
@@ -156,8 +153,7 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     bank = context.user_data.get("bank")
     logger.info(f"DEBUG: User Input -> Branch={user_branch}, Bank={bank}, State={state}")
 
-    # पहले ही बता दो कि search हो रहा है
-    await update.message.reply_text("🔍 Searching your IFSC details, कृपया wait करें...")
+    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
     async def process_query():
         df, suggestions = search_ifsc(state, bank, user_branch)
@@ -239,8 +235,11 @@ def main():
     application.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        url_path=TELEGRAM_TOKEN,
-        webhook_url=f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
+        url_path=TELEGRAM_TOKEN
+    )
+    # ✅ अब अलग से webhook set करना होगा
+    application.bot.set_webhook(
+        url=f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
     )
 
     logger.info(f"🚀 Bot started in webhook mode at https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}")
