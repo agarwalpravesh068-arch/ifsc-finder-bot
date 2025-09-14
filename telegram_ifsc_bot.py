@@ -5,7 +5,8 @@ import difflib
 import os
 from dotenv import load_dotenv
 from datetime import datetime
-from telegram import Update, ChatAction
+from telegram import Update
+from telegram.constants import ChatAction
 from telegram.ext import (
     Updater, CommandHandler, MessageHandler, Filters,
     CallbackContext, ConversationHandler
