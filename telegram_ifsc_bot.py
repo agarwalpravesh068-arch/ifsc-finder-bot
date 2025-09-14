@@ -6,6 +6,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from datetime import datetime
+from flask import Flask, request
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
@@ -162,49 +163,39 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operation cancel कर दिया गया।")
     return ConversationHandler.END
 
-# ------------------ Health Check ------------------
-from http.server import BaseHTTPRequestHandler, HTTPServer
-import threading
 
-def start_health_server():
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"OK")
-    server = HTTPServer(("0.0.0.0", int(os.environ.get("PORT", 10000))), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
+# ------------------ Main with Flask ------------------
+app = Flask(__name__)
+application = Application.builder().token(TELEGRAM_TOKEN).build()
 
-# ------------------ Main ------------------
+conv_handler = ConversationHandler(
+    entry_points=[CommandHandler("start", start)],
+    states={
+        STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_state)],
+        BANK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank)],
+        BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel)],
+    conversation_timeout=60,
+)
+application.add_handler(conv_handler)
+application.add_handler(CommandHandler("help", help_command))
+application.add_handler(MessageHandler(filters.Regex(r'^(hi|hello|hey|namaste)$') & ~filters.COMMAND, greet_user))
+
+@app.route("/", methods=["GET"])
+def health_check():
+    return "✅ IFSC Finder Bot running!", 200
+
+@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
+async def webhook():
+    data = request.get_json(force=True)
+    update = Update.de_json(data, application.bot)
+    await application.process_update(update)
+    return "OK", 200
+
 def main():
-    # Start health check server for Render
-    start_health_server()
-
-    application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start)],
-        states={
-            STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_state)],
-            BANK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank)],
-            BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
-        },
-        fallbacks=[CommandHandler("cancel", cancel)],
-        conversation_timeout=60,
-    )
-    application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.Regex(r'^(hi|hello|hey|namaste)$') & ~filters.COMMAND, greet_user))
-
     PORT = int(os.environ.get("PORT", 10000))
-    webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
-
-    application.run_webhook(
-        listen="0.0.0.0",
-        port=PORT,
-        url_path=TELEGRAM_TOKEN,
-        webhook_url=webhook_url,
-    )
+    app.run(host="0.0.0.0", port=PORT)
 
 if __name__ == "__main__":
     main()
