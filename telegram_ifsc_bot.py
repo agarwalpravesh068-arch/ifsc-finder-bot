@@ -74,7 +74,7 @@ def search_ifsc(state, branch):
     state_lower = state.lower().strip()
     branch_lower = branch.lower().strip()
 
-    # ✅ Exact Match
+    # ✅ Exact Match First
     exact_result = df[
         (df["State"].str.lower() == state_lower) &
         (df["Branch"].str.lower() == branch_lower)
@@ -87,15 +87,21 @@ def search_ifsc(state, branch):
     suggestions = []
     if state_lower in state_branch_index:
         all_branches = list(state_branch_index[state_lower])
-        matches = difflib.get_close_matches(branch_lower, all_branches, n=3, cutoff=0.4)
+        matches = difflib.get_close_matches(branch_lower, all_branches, n=3, cutoff=0.3)
         logger.info(f"🔍 Fuzzy suggestions for '{branch}': {matches}")
         if matches:
             suggestions = matches
 
+    # ✅ Partial Match (contains)
     filtered_df = df[
         (df["State"].str.lower() == state_lower) &
-        (df["Branch"].str.contains(branch, case=False, na=False))
+        (df["Branch"].str.contains(branch_lower, case=False, na=False))
     ]
+
+    # अगर partial match empty है लेकिन suggestions मिले हैं → सिर्फ suggestions return करो
+    if filtered_df.empty and suggestions:
+        return pd.DataFrame(), suggestions
+
     return filtered_df, suggestions
 
 # ================== Log Queries ==================
