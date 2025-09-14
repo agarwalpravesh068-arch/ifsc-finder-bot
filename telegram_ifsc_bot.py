@@ -137,9 +137,6 @@ async def greet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return await start(update, context)
 
 async def get_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        await update.message.reply_text("❌ Invalid input, कृपया सही State भेजें।")
-        return STATE
     user_state = update.message.text.strip()
     context.user_data["state"] = user_state
     logger.info(f"DEBUG: User Input -> State={user_state}")
@@ -147,9 +144,6 @@ async def get_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return BANK
 
 async def get_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        await update.message.reply_text("❌ Invalid input, कृपया सही Bank भेजें।")
-        return BANK
     user_bank = update.message.text.strip()
     context.user_data["bank"] = user_bank
     logger.info(f"DEBUG: User Input -> Bank={user_bank}, State={context.user_data.get('state')}")
@@ -157,15 +151,13 @@ async def get_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return BRANCH
 
 async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.message or not update.message.text:
-        await update.message.reply_text("❌ Invalid input, कृपया सही Branch भेजें।")
-        return BRANCH
     user_branch = update.message.text.strip()
     state = context.user_data.get("state")
     bank = context.user_data.get("bank")
     logger.info(f"DEBUG: User Input -> Branch={user_branch}, Bank={bank}, State={state}")
 
-    await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
+    # पहले ही बता दो कि search हो रहा है
+    await update.message.reply_text("🔍 Searching your IFSC details, कृपया wait करें...")
 
     async def process_query():
         df, suggestions = search_ifsc(state, bank, user_branch)
@@ -231,8 +223,7 @@ def main():
             BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        allow_reentry=True,  # ✅ Fix: allow re-entry in conversation
-        conversation_timeout=120
+        conversation_timeout=60
     )
 
     application.add_handler(conv_handler)
