@@ -3,4 +3,3 @@ pandas
 chardet
 python-dotenv
 python-telegram-bot
-imghdr-py
