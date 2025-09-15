@@ -11,6 +11,8 @@ from telegram.ext import (
     ContextTypes,
     filters,
 )
+from datetime import datetime
+import asyncio
 
 # Enable logging
 logging.basicConfig(
@@ -24,11 +26,11 @@ STATE, BANK, BRANCH = range(3)
 # Load CSV
 df = pd.read_csv("ifsc.csv", dtype=str, encoding="latin1", on_bad_lines="skip").fillna("N/A")
 
-# Unique values (uppercase for consistency)
+# Unique values
 states = sorted(df["State"].str.strip().unique())
 banks = sorted(df["Bank"].str.strip().unique())
 
-# Aliases (uppercase only)
+# Aliases
 BANK_ALIASES = {
     "SBI": "STATE BANK OF INDIA",
     "PNB": "PUNJAB NATIONAL BANK",
@@ -45,7 +47,24 @@ def website_button():
         [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
     )
 
-# Start command
+# ---------------- Logging Queries ----------------
+def log_query(user, state, bank, branch, result_count):
+    log_file = "queries_log.csv"
+    log_data = {
+        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "user_id": user.id,
+        "username": user.username,
+        "name": f"{user.first_name or ''} {user.last_name or ''}".strip(),
+        "state": state,
+        "bank": bank,
+        "branch": branch,
+        "results": result_count,
+    }
+    df_log = pd.DataFrame([log_data])
+    df_log.to_csv(log_file, mode="a", header=not os.path.exists(log_file), index=False)
+    logger.info(f"📝 Query Logged: {log_data}")
+
+# ---------------- Handlers ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to *IFSC Finder | PMetroMart*!\nकृपया अपना *STATE* लिखें:",
@@ -54,7 +73,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     return STATE
 
-# State handler
 async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state = update.message.text.strip().upper()
     match = process.extractOne(user_state, states, scorer=fuzz.WRatio)
@@ -65,7 +83,6 @@ async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ State नहीं मिला।", reply_markup=website_button())
     return ConversationHandler.END
 
-# Bank handler
 async def bank_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_bank = update.message.text.strip().upper()
 
@@ -83,7 +100,6 @@ async def bank_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(f"❌ Bank '{user_bank}' नहीं मिला।", reply_markup=website_button())
     return ConversationHandler.END
 
-# Branch handler
 async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_branch = update.message.text.strip().upper()
     state = context.user_data.get("state")
@@ -95,7 +111,7 @@ async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text("⌛ Searching... कृपया wait करें:", reply_markup=website_button())
 
-    # Filter by state & bank
+    # Filter dataframe
     subset = df[
         (df["State"].str.upper() == state.upper()) &
         (df["Bank"].str.upper() == bank.upper())
@@ -103,19 +119,22 @@ async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if subset.empty:
         await update.message.reply_text("❌ No branches found.", reply_markup=website_button())
+        log_query(update.message.from_user, state, bank, user_branch, 0)
         return ConversationHandler.END
 
-    # Fuzzy branch match
+    # Fuzzy branch
     branches = subset["Branch"].str.strip().unique()
     match = process.extractOne(user_branch, branches, scorer=fuzz.WRatio)
 
     if not match or match[1] < 70:
         await update.message.reply_text(f"❌ Branch '{user_branch}' नहीं मिला।", reply_markup=website_button())
+        log_query(update.message.from_user, state, bank, user_branch, 0)
         return ConversationHandler.END
 
     branch_name = match[0]
     result = subset[subset["Branch"].str.strip().str.upper() == branch_name.upper()]
 
+    # Send results
     for _, row in result.iterrows():
         msg = (
             f"🏦 *Bank:* {row['Bank']}\n"
@@ -129,14 +148,28 @@ async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         await update.message.reply_text(msg, parse_mode="Markdown")
 
+    # ✅ Log query
+    log_query(update.message.from_user, state, bank, user_branch, len(result))
+
+    # ✅ 10s later send thank you msg
+    async def delayed_thank_you():
+        await asyncio.sleep(10)
+        await update.message.reply_text(
+            "🙏 Thank you for choosing *IFSC Finder | PMetroMart*!\n\n"
+            "🔄 दुबारा IFSC code search करने के लिए /start दबाएँ\n"
+            "🌐 या हमारी website पर visit करें:",
+            parse_mode="Markdown",
+            reply_markup=website_button()
+        )
+    asyncio.create_task(delayed_thank_you())
+
     return ConversationHandler.END
 
-# Cancel
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Conversation cancelled.")
     return ConversationHandler.END
 
-# Main
+# ---------------- Main ----------------
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
