@@ -4,3 +4,4 @@ python-dotenv
 chardet
 rapidfuzz
 mysql-connector-python
+Flask
