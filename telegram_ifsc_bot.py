@@ -5,7 +5,7 @@ import difflib
 import os
 import asyncio
 from dotenv import load_dotenv
-from flask import Flask, request
+from datetime import datetime
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
@@ -47,7 +47,6 @@ cached_df = None
 def detect_encoding(file_path):
     with open(file_path, "rb") as f:
         result = chardet.detect(f.read())
-    logger.info(f"✅ CSV Encoding: {result['encoding']}")
     return result["encoding"]
 
 def load_csv():
@@ -55,7 +54,6 @@ def load_csv():
     if cached_df is None:
         encoding = detect_encoding(CSV_FILE)
         cached_df = pd.read_csv(CSV_FILE, encoding=encoding)
-        logger.info(f"✅ CSV Loaded, rows = {len(cached_df)}")
         cached_df["State"] = cached_df["State"].astype(str).str.strip()
         cached_df["Bank"] = cached_df["Bank"].astype(str).str.strip()
         cached_df["Branch"] = cached_df["Branch"].astype(str).str.strip()
@@ -128,7 +126,6 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async def process():
         df, suggestions = search_ifsc(state, bank, branch)
-
         if df.empty:
             if suggestions:
                 await update.message.reply_text(f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}")
@@ -137,24 +134,22 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             for _, row in df.iterrows():
                 msg = (
-                    f"🏦 Bank: {row['Bank']}\n"
-                    f"🌍 State: {row['State']}\n"
-                    f"🏙 District: {row['District']}\n"
-                    f"🏢 Branch: {row['Branch']}\n"
-                    f"📌 Address: {row['Address']}\n"
-                    f"🔑 IFSC: {row['IFSC']}\n"
-                    f"💳 MICR: {row['MICR']}\n"
-                    f"📞 Contact: {row['Contact']}"
+                    f"🏦 *Bank:* {row['Bank']}\n"
+                    f"🌍 *State:* {row['State']}\n"
+                    f"🏙 *District:* {row['District']}\n"
+                    f"🏢 *Branch:* {row['Branch']}\n"
+                    f"📌 *Address:* {row['Address']}\n"
+                    f"🔑 *IFSC:* `{row['IFSC']}`\n"
+                    f"💳 *MICR:* {row['MICR']}\n"
+                    f"📞 *Contact:* {row['Contact']}"
                 )
-                await update.message.reply_text(msg)
+                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
             await update.message.reply_text("✅ Search पूरा हुआ।\n/start से दोबारा शुरू करें।")
 
     try:
         await asyncio.wait_for(process(), timeout=25)
     except asyncio.TimeoutError:
-        await update.message.reply_text(
-            "⌛ Result delay हो गया।\n👉 Website: https://pmetromart.in/ifsc/"
-        )
+        await update.message.reply_text("⌛ Result delay हो गया।\n👉 Website: https://pmetromart.in/ifsc/")
 
     return ConversationHandler.END
 
@@ -162,46 +157,33 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operation cancel कर दिया गया।")
     return ConversationHandler.END
 
-
-# ------------------ Flask + PTB ------------------
-app = Flask(__name__)
-application = Application.builder().token(TELEGRAM_TOKEN).build()
-
-conv_handler = ConversationHandler(
-    entry_points=[CommandHandler("start", start)],
-    states={
-        STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_state)],
-        BANK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank)],
-        BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
-    },
-    fallbacks=[CommandHandler("cancel", cancel)],
-    conversation_timeout=60,
-)
-application.add_handler(conv_handler)
-application.add_handler(CommandHandler("help", help_command))
-application.add_handler(MessageHandler(filters.Regex(r'^(hi|hello|hey|namaste)$') & ~filters.COMMAND, greet_user))
-
-@app.route("/", methods=["GET"])
-def health_check():
-    return "✅ IFSC Finder Bot running!", 200
-
-@app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
-async def webhook():
-    data = request.get_json(force=True)
-    update = Update.de_json(data, application.bot)
-    await application.process_update(update)
-    return "OK", 200
-
-async def run_bot():
-    await application.initialize()
-    await application.start()
-    await application.updater.start_polling()
-
+# ------------------ Main ------------------
 def main():
+    application = Application.builder().token(TELEGRAM_TOKEN).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start)],
+        states={
+            STATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_state)],
+            BANK: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_bank)],
+            BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
+        },
+        fallbacks=[CommandHandler("cancel", cancel)],
+        conversation_timeout=60,
+    )
+    application.add_handler(conv_handler)
+    application.add_handler(CommandHandler("help", help_command))
+    application.add_handler(MessageHandler(filters.Regex(r'^(hi|hello|hey|namaste)$') & ~filters.COMMAND, greet_user))
+
     PORT = int(os.environ.get("PORT", 10000))
-    loop = asyncio.get_event_loop()
-    loop.create_task(run_bot())
-    app.run(host="0.0.0.0", port=PORT)
+    webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        url_path=TELEGRAM_TOKEN,
+        webhook_url=webhook_url,
+    )
 
 if __name__ == "__main__":
     main()

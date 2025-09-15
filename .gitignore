@@ -1,4 +1,4 @@
-.env
 __pycache__/
 *.pyc
-*.csv     # अगर आप CSV public नहीं रखना चाहते तो uncomment रखें
+.env
+queries_log.csv
