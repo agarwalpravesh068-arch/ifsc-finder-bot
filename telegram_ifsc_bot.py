@@ -1,9 +1,9 @@
 import logging
 import pandas as pd
-import chardet
-import difflib
 import os
+import asyncio
 from dotenv import load_dotenv
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
@@ -38,61 +38,39 @@ logger.info(f"✅ RENDER_EXTERNAL_HOSTNAME: {RENDER_EXTERNAL_HOSTNAME}")
 # Conversation states
 STATE, BANK, BRANCH = range(3)
 
-# ------------------ CSV Preload & Dictionary Index ------------------
+# ------------------ Load CSV into Dictionary ------------------
 CSV_FILE = "ifsc.csv"
-lookup = {}  # {state: {bank: {branch: row_dict}}}
+ifsc_dict = {}
 
-def detect_encoding(file_path):
-    with open(file_path, "rb") as f:
-        result = chardet.detect(f.read())
-    return result["encoding"]
-
-def load_csv():
-    global lookup
-    if lookup:
-        return lookup
-
-    encoding = detect_encoding(CSV_FILE)
-    df = pd.read_csv(CSV_FILE, encoding=encoding)
-    df = df.fillna("")
-
+def load_ifsc_dict():
+    global ifsc_dict
+    df = pd.read_csv(CSV_FILE, dtype=str).fillna("")
     for _, row in df.iterrows():
-        state = str(row["State"]).strip().lower()
-        bank = str(row["Bank"]).strip().lower()
-        branch = str(row["Branch"]).strip().lower()
+        key = (row["State"].strip().lower(),
+               row["Bank"].strip().lower(),
+               row["Branch"].strip().lower())
+        ifsc_dict[key] = row.to_dict()
+    logger.info(f"✅ IFSC Dictionary loaded with {len(ifsc_dict)} entries")
 
-        if state not in lookup:
-            lookup[state] = {}
-        if bank not in lookup[state]:
-            lookup[state][bank] = {}
-        lookup[state][bank][branch] = row.to_dict()
+load_ifsc_dict()
 
-    logger.info(f"✅ Dictionary Index Ready: {len(df)} rows indexed")
-    return lookup
-
-# ------------------ Search Function ------------------
+# ------------------ Search ------------------
 def search_ifsc(state, bank, branch):
-    load_csv()
-    state, bank, branch = state.strip().lower(), bank.strip().lower(), branch.strip().lower()
+    key = (state.strip().lower(), bank.strip().lower(), branch.strip().lower())
+    return ifsc_dict.get(key, None)
 
-    # ✅ Exact match
-    if state in lookup and bank in lookup[state] and branch in lookup[state][bank]:
-        return [lookup[state][bank][branch]], None
-
-    # ✅ Fuzzy suggestions
-    suggestions = []
-    if state in lookup and bank in lookup[state]:
-        all_branches = list(lookup[state][bank].keys())
-        suggestions = difflib.get_close_matches(branch, all_branches, n=3, cutoff=0.4)
-
-    return [], suggestions
+# ------------------ Common Website Button ------------------
+def get_website_button():
+    keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+    return InlineKeyboardMarkup(keyboard)
 
 # ------------------ Bot Handlers ------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "👋 Welcome to *IFSC Finder | PMetroMart*!\n\n"
         "कृपया अपना *State* लिखें:",
-        parse_mode=ParseMode.MARKDOWN
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=get_website_button()
     )
     return STATE
 
@@ -101,9 +79,9 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "ℹ️ IFSC Finder Help\n\n"
         "1️⃣ /start - Bot शुरू करें\n"
         "2️⃣ State → Bank → Branch\n"
-        "➡️ फिर Bot आपको IFSC देगा।\n\n"
-        "🌐 Website: https://pmetromart.in/ifsc/",
-        parse_mode=ParseMode.MARKDOWN
+        "➡️ फिर Bot आपको IFSC देगा।",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=get_website_button()
     )
 
 async def greet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -125,43 +103,43 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
-    results, suggestions = search_ifsc(state, bank, branch)
-
-    if results:
-        for row in results:
-            msg = (
-                f"🏦 Bank: {row['Bank']}\n"
-                f"🌍 State: {row['State']}\n"
-                f"🏙 District: {row['District']}\n"
-                f"🏢 Branch: {row['Branch']}\n"
-                f"📌 Address: {row['Address']}\n"
-                f"🔑 IFSC: {row['IFSC']}\n"
-                f"💳 MICR: {row['MICR']}\n"
-                f"📞 Contact: {row['Contact']}"
+    async def process():
+        row = search_ifsc(state, bank, branch)
+        if not row:
+            await update.message.reply_text(
+                "❌ Result नहीं मिला।\n👉 आप हमारी website पर चेक कर सकते हैं:",
+                reply_markup=get_website_button()
             )
-            await update.message.reply_text(msg)
-        await update.message.reply_text("✅ Search पूरा हुआ।\n/start से दोबारा शुरू करें।")
+        else:
+            msg = (
+                f"🏦 *Bank:* {row['Bank']}\n"
+                f"🌍 *State:* {row['State']}\n"
+                f"🏙 *District:* {row['District']}\n"
+                f"🏢 *Branch:* {row['Branch']}\n"
+                f"📌 *Address:* {row['Address']}\n"
+                f"🔑 *IFSC:* `{row['IFSC']}`\n"
+                f"💳 *MICR:* {row['MICR']}\n"
+                f"📞 *Contact:* {row['Contact']}"
+            )
+            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
-    elif suggestions:
-        await update.message.reply_text(f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}")
+            await update.message.reply_text(
+                "✅ Search पूरा हुआ।",
+                reply_markup=get_website_button()
+            )
 
-    else:
-        keyboard = [[InlineKeyboardButton("🌐 Open IFSC Finder Website", url="https://pmetromart.in/ifsc/")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+    try:
+        await asyncio.wait_for(process(), timeout=60)  # timeout = 60s
+    except asyncio.TimeoutError:
         await update.message.reply_text(
-            "❌ कोई result नहीं मिला।\n👉 आप हमारी वेबसाइट पर भी check कर सकते हैं:",
-            reply_markup=reply_markup
+            "⌛ Search delay हो गया।\n👉 आप हमारी website पर चेक कर सकते हैं:",
+            reply_markup=get_website_button()
         )
 
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton("🌐 Open IFSC Finder Website", url="https://pmetromart.in/ifsc/")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(
-        "❌ Operation cancel कर दिया गया।\n👉 आप हमारी वेबसाइट पर भी check कर सकते हैं:",
-        reply_markup=reply_markup
-    )
+    await update.message.reply_text("❌ Operation cancel कर दिया गया।", reply_markup=get_website_button())
     return ConversationHandler.END
 
 # ------------------ Main ------------------
