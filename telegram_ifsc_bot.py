@@ -21,25 +21,22 @@ logger = logging.getLogger(__name__)
 # States
 STATE, BANK, BRANCH = range(3)
 
-# Load data safely with memory optimization
+# Load CSV
 df = pd.read_csv("ifsc.csv", dtype=str, encoding="latin1", on_bad_lines="skip").fillna("N/A")
 
-# Create dictionaries for fast lookup
+# Unique values (uppercase for consistency)
 states = sorted(df["State"].str.strip().unique())
 banks = sorted(df["Bank"].str.strip().unique())
 
-state_dict = {s.lower(): s for s in states}
-bank_dict = {b.lower(): b for b in banks}
-
-# Bank aliases
+# Aliases (uppercase only)
 BANK_ALIASES = {
-    "sbi": "STATE BANK OF INDIA",
-    "pnb": "PUNJAB NATIONAL BANK",
-    "hdfc": "HDFC BANK",
-    "icici": "ICICI BANK",
-    "bob": "BANK OF BARODA",
-    "boi": "BANK OF INDIA",
-    "canara": "CANARA BANK",
+    "SBI": "STATE BANK OF INDIA",
+    "PNB": "PUNJAB NATIONAL BANK",
+    "HDFC": "HDFC BANK",
+    "ICICI": "ICICI BANK",
+    "BOB": "BANK OF BARODA",
+    "BOI": "BANK OF INDIA",
+    "CANARA": "CANARA BANK",
 }
 
 # Website button
@@ -51,7 +48,7 @@ def website_button():
 # Start command
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "👋 Welcome to IFSC Finder | PMetroMart!\nकृपया अपना *State* लिखें:",
+        "👋 Welcome to *IFSC Finder | PMetroMart*!\nकृपया अपना *STATE* लिखें:",
         parse_mode="Markdown",
         reply_markup=website_button()
     )
@@ -59,59 +56,36 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # State handler
 async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_state = update.message.text.strip().lower()
-    logger.info(f"User entered state: {user_state}")
-
+    user_state = update.message.text.strip().upper()
     match = process.extractOne(user_state, states, scorer=fuzz.WRatio)
-    if match and match[1] >= 70:   # threshold अब 70
+    if match and match[1] > 80:
         context.user_data["state"] = match[0]
-        await update.message.reply_text(
-            f"✅ State मिला! अब *Bank* का नाम भेजें:",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text(f"✅ State मिला! अब *BANK* का नाम भेजें:", parse_mode="Markdown")
         return BANK
-
-    await update.message.reply_text(
-        f"❌ State '{user_state}' नहीं मिला।",
-        reply_markup=website_button()
-    )
+    await update.message.reply_text("❌ State नहीं मिला।", reply_markup=website_button())
     return ConversationHandler.END
 
 # Bank handler
 async def bank_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_bank = update.message.text.strip().lower()
-    logger.info(f"User entered bank: {user_bank}")
+    user_bank = update.message.text.strip().upper()
 
-    # पहले alias check करो
     if user_bank in BANK_ALIASES:
         bank_name = BANK_ALIASES[user_bank]
-        logger.info(f"Alias matched: {user_bank} -> {bank_name}")
     else:
         match = process.extractOne(user_bank, banks, scorer=fuzz.WRatio)
-        if match and match[1] >= 70:   # threshold अब 70
-            bank_name = match[0]
-            logger.info(f"Fuzzy matched bank: {user_bank} -> {bank_name}")
-        else:
-            bank_name = None
-            logger.warning(f"No match found for bank: {user_bank}")
+        bank_name = match[0] if match and match[1] > 80 else None
 
     if bank_name:
         context.user_data["bank"] = bank_name
-        await update.message.reply_text(
-            f"✅ Bank मिला! अब *Branch* का नाम भेजें:",
-            parse_mode="Markdown"
-        )
+        await update.message.reply_text(f"✅ Bank मिला! अब *BRANCH* का नाम भेजें:", parse_mode="Markdown")
         return BRANCH
 
-    await update.message.reply_text(
-        f"❌ Bank '{user_bank}' नहीं मिला।",
-        reply_markup=website_button()
-    )
+    await update.message.reply_text(f"❌ Bank '{user_bank}' नहीं मिला।", reply_markup=website_button())
     return ConversationHandler.END
 
 # Branch handler
 async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_branch = update.message.text.strip().lower()
+    user_branch = update.message.text.strip().upper()
     state = context.user_data.get("state")
     bank = context.user_data.get("bank")
 
@@ -119,13 +93,13 @@ async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Session expired. कृपया /start करें।")
         return ConversationHandler.END
 
-    await update.message.reply_text(
-        "⌛ Searching... अगर ज्यादा समय लगे तो आप हमारी website पर भी check कर सकते हैं:",
-        reply_markup=website_button()
-    )
+    await update.message.reply_text("⌛ Searching... कृपया wait करें:", reply_markup=website_button())
 
-    # Filter dataframe
-    subset = df[(df["State"].str.lower() == state.lower()) & (df["Bank"].str.lower() == bank.lower())]
+    # Filter by state & bank
+    subset = df[
+        (df["State"].str.upper() == state.upper()) &
+        (df["Bank"].str.upper() == bank.upper())
+    ]
 
     if subset.empty:
         await update.message.reply_text("❌ No branches found.", reply_markup=website_button())
@@ -134,15 +108,13 @@ async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Fuzzy branch match
     branches = subset["Branch"].str.strip().unique()
     match = process.extractOne(user_branch, branches, scorer=fuzz.WRatio)
+
     if not match or match[1] < 70:
-        await update.message.reply_text(
-            f"❌ Branch '{user_branch}' नहीं मिला।",
-            reply_markup=website_button()
-        )
+        await update.message.reply_text(f"❌ Branch '{user_branch}' नहीं मिला।", reply_markup=website_button())
         return ConversationHandler.END
 
     branch_name = match[0]
-    result = subset[subset["Branch"].str.strip().str.lower() == branch_name.lower()]
+    result = subset[subset["Branch"].str.strip().str.upper() == branch_name.upper()]
 
     for _, row in result.iterrows():
         msg = (
@@ -159,15 +131,16 @@ async def branch_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     return ConversationHandler.END
 
-# Cancel handler
+# Cancel
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Conversation cancelled.")
     return ConversationHandler.END
 
+# Main
 def main():
-    token = os.getenv("TELEGRAM_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+    token = os.getenv("TELEGRAM_TOKEN")
     if not token:
-        raise ValueError("Telegram Bot Token not found in environment variables!")
+        raise ValueError("❌ TELEGRAM_TOKEN not found in env!")
 
     application = Application.builder().token(token).build()
 
@@ -180,7 +153,6 @@ def main():
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
-
     application.add_handler(conv_handler)
 
     port = int(os.environ.get("PORT", 8080))
