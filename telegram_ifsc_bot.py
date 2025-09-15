@@ -133,14 +133,7 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if suggestions:
                 await update.message.reply_text(f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}")
             else:
-                # 🔘 Website redirect button
-                keyboard = [[InlineKeyboardButton("🌐 हमारी Website पर जाएं", url="https://pmetromart.in/ifsc/")]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-
-                await update.message.reply_text(
-                    "❌ कोई result नहीं मिला।\n👉 हमारी website पर भी check करें:",
-                    reply_markup=reply_markup
-                )
+                await update.message.reply_text("❌ कोई result नहीं मिला।")
         else:
             for _, row in df.iterrows():
                 msg = (
@@ -159,25 +152,23 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await asyncio.wait_for(process(), timeout=25)
     except asyncio.TimeoutError:
-        keyboard = [[InlineKeyboardButton("🌐 हमारी Website पर जाएं", url="https://pmetromart.in/ifsc/")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-
-        await update.message.reply_text(
-            "⌛ Result delay हो गया।\n👉 हमारी website से भी check करें:",
-            reply_markup=reply_markup
-        )
+        await send_website_button(update, context)
 
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await send_website_button(update, context)
+    return ConversationHandler.END
+
+async def send_website_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🌐 हमारी Website पर जाएं", url="https://pmetromart.in/ifsc/")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-
-    await update.message.reply_text(
-        "❌ Operation cancel कर दिया गया।\n👉 हमारी website से भी check करें:",
-        reply_markup=reply_markup
-    )
-    return ConversationHandler.END
+    if update and update.effective_chat:
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="⌛ Search fail हुआ है।\n👉 हमारी website से भी check करें:",
+            reply_markup=reply_markup
+        )
 
 # ------------------ Main ------------------
 def main():
