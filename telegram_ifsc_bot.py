@@ -5,7 +5,6 @@ import difflib
 import os
 import asyncio
 from dotenv import load_dotenv
-from datetime import datetime
 from telegram import Update
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
@@ -47,6 +46,7 @@ cached_df = None
 def detect_encoding(file_path):
     with open(file_path, "rb") as f:
         result = chardet.detect(f.read())
+    logger.info(f"✅ CSV Encoding: {result['encoding']}")
     return result["encoding"]
 
 def load_csv():
@@ -54,6 +54,7 @@ def load_csv():
     if cached_df is None:
         encoding = detect_encoding(CSV_FILE)
         cached_df = pd.read_csv(CSV_FILE, encoding=encoding)
+        logger.info(f"✅ CSV Loaded, rows = {len(cached_df)}")
         cached_df["State"] = cached_df["State"].astype(str).str.strip()
         cached_df["Bank"] = cached_df["Bank"].astype(str).str.strip()
         cached_df["Branch"] = cached_df["Branch"].astype(str).str.strip()
@@ -126,6 +127,7 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     async def process():
         df, suggestions = search_ifsc(state, bank, branch)
+
         if df.empty:
             if suggestions:
                 await update.message.reply_text(f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}")
@@ -134,22 +136,24 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             for _, row in df.iterrows():
                 msg = (
-                    f"🏦 *Bank:* {row['Bank']}\n"
-                    f"🌍 *State:* {row['State']}\n"
-                    f"🏙 *District:* {row['District']}\n"
-                    f"🏢 *Branch:* {row['Branch']}\n"
-                    f"📌 *Address:* {row['Address']}\n"
-                    f"🔑 *IFSC:* `{row['IFSC']}`\n"
-                    f"💳 *MICR:* {row['MICR']}\n"
-                    f"📞 *Contact:* {row['Contact']}"
+                    f"🏦 Bank: {row['Bank']}\n"
+                    f"🌍 State: {row['State']}\n"
+                    f"🏙 District: {row['District']}\n"
+                    f"🏢 Branch: {row['Branch']}\n"
+                    f"📌 Address: {row['Address']}\n"
+                    f"🔑 IFSC: {row['IFSC']}\n"
+                    f"💳 MICR: {row['MICR']}\n"
+                    f"📞 Contact: {row['Contact']}"
                 )
-                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
+                await update.message.reply_text(msg)
             await update.message.reply_text("✅ Search पूरा हुआ।\n/start से दोबारा शुरू करें।")
 
     try:
         await asyncio.wait_for(process(), timeout=25)
     except asyncio.TimeoutError:
-        await update.message.reply_text("⌛ Result delay हो गया।\n👉 Website: https://pmetromart.in/ifsc/")
+        await update.message.reply_text(
+            "⌛ Result delay हो गया।\n👉 Website: https://pmetromart.in/ifsc/"
+        )
 
     return ConversationHandler.END
 
