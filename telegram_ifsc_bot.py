@@ -5,8 +5,7 @@ import difflib
 import os
 import asyncio
 from dotenv import load_dotenv
-from datetime import datetime
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -89,22 +88,28 @@ def search_ifsc(state, bank, branch):
 
 # ------------------ Bot Handlers ------------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
         "👋 Welcome to *IFSC Finder | PMetroMart*!\n\n"
-        "कृपया अपना *State* लिखें:\n\n"
-        "🌐 Visit: https://pmetromart.in/ifsc/",
-        parse_mode=ParseMode.MARKDOWN
+        "कृपया अपना *State* लिखें:",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
     )
     return STATE
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
         "ℹ️ IFSC Finder Help\n\n"
         "1️⃣ /start - Bot शुरू करें\n"
         "2️⃣ State → Bank → Branch\n"
-        "➡️ फिर Bot आपको IFSC देगा।\n\n"
-        "🌐 Website: https://pmetromart.in/ifsc/",
-        parse_mode=ParseMode.MARKDOWN
+        "➡️ फिर Bot आपको IFSC देगा।",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=reply_markup
     )
 
 async def greet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -126,24 +131,30 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
+    keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    waiting_msg = await update.message.reply_text(
+        "⌛ Searching... अगर ज्यादा समय लगे तो आप हमारी website पर भी चेक कर सकते हैं:",
+        reply_markup=reply_markup
+    )
+
     async def process():
         df, suggestions = search_ifsc(state, bank, branch)
 
         if df.empty:
-            keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-
             if suggestions:
-                await update.message.reply_text(
+                await waiting_msg.edit_text(
                     f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}",
                     reply_markup=reply_markup
                 )
             else:
-                await update.message.reply_text(
+                await waiting_msg.edit_text(
                     "❌ कोई result नहीं मिला।",
                     reply_markup=reply_markup
                 )
         else:
+            result_msgs = []
             for _, row in df.iterrows():
                 msg = (
                     f"🏦 Bank: {row['Bank']}\n"
@@ -155,19 +166,18 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     f"💳 MICR: {row['MICR']}\n"
                     f"📞 Contact: {row['Contact']}"
                 )
-                await update.message.reply_text(msg)
-            await update.message.reply_text("✅ Search पूरा हुआ।\n/start से दोबारा शुरू करें।")
+                result_msgs.append(msg)
 
-    try:
-        await asyncio.wait_for(process(), timeout=60)
-    except asyncio.TimeoutError:
-        keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(
-            "⌛ Search delay हो गया।\n👉 आप हमारी website पर भी चेक कर सकते हो:",
-            reply_markup=reply_markup
-        )
+            await waiting_msg.edit_text(result_msgs[0])
+            for extra in result_msgs[1:]:
+                await update.message.reply_text(extra)
 
+            await update.message.reply_text(
+                "✅ Search पूरा हुआ।\n/start से दोबारा शुरू करें।",
+                reply_markup=reply_markup
+            )
+
+    asyncio.create_task(process())
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
