@@ -5,7 +5,8 @@ import difflib
 import os
 import asyncio
 from dotenv import load_dotenv
-from telegram import Update
+from datetime import datetime
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -132,7 +133,14 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if suggestions:
                 await update.message.reply_text(f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}")
             else:
-                await update.message.reply_text("❌ कोई result नहीं मिला।")
+                # 🔘 Website redirect button
+                keyboard = [[InlineKeyboardButton("🌐 हमारी Website पर जाएं", url="https://pmetromart.in/ifsc/")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+
+                await update.message.reply_text(
+                    "❌ कोई result नहीं मिला।\n👉 हमारी website पर भी check करें:",
+                    reply_markup=reply_markup
+                )
         else:
             for _, row in df.iterrows():
                 msg = (
@@ -151,14 +159,24 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await asyncio.wait_for(process(), timeout=25)
     except asyncio.TimeoutError:
+        keyboard = [[InlineKeyboardButton("🌐 हमारी Website पर जाएं", url="https://pmetromart.in/ifsc/")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+
         await update.message.reply_text(
-            "⌛ Result delay हो गया।\n👉 Website: https://pmetromart.in/ifsc/"
+            "⌛ Result delay हो गया।\n👉 हमारी website से भी check करें:",
+            reply_markup=reply_markup
         )
 
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("❌ Operation cancel कर दिया गया।")
+    keyboard = [[InlineKeyboardButton("🌐 हमारी Website पर जाएं", url="https://pmetromart.in/ifsc/")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    await update.message.reply_text(
+        "❌ Operation cancel कर दिया गया।\n👉 हमारी website से भी check करें:",
+        reply_markup=reply_markup
+    )
     return ConversationHandler.END
 
 # ------------------ Main ------------------
