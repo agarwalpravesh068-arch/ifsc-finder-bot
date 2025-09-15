@@ -1,6 +1,5 @@
 import logging
 import pandas as pd
-import chardet
 import difflib
 import os
 import asyncio
@@ -16,207 +15,140 @@ from telegram.ext import (
     filters,
 )
 
-# ------------------ Logging ------------------
+# ---------------- Logging ----------------
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# ------------------ Env Vars ------------------
+# ---------------- Env Vars ----------------
 load_dotenv()
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 RENDER_EXTERNAL_HOSTNAME = os.getenv("RENDER_EXTERNAL_HOSTNAME")
 
-if not TELEGRAM_TOKEN:
-    raise ValueError("❌ TELEGRAM_TOKEN missing (check Render env)")
-if not RENDER_EXTERNAL_HOSTNAME:
-    raise ValueError("❌ RENDER_EXTERNAL_HOSTNAME missing (check Render env)")
-
-logger.info(f"✅ TELEGRAM_TOKEN loaded: {TELEGRAM_TOKEN[:8]}...")
-logger.info(f"✅ RENDER_EXTERNAL_HOSTNAME: {RENDER_EXTERNAL_HOSTNAME}")
+if not TELEGRAM_TOKEN or not RENDER_EXTERNAL_HOSTNAME:
+    raise ValueError("❌ Missing TELEGRAM_TOKEN or RENDER_EXTERNAL_HOSTNAME in env")
 
 # Conversation states
 STATE, BANK, BRANCH = range(3)
 
-# ------------------ CSV Load ------------------
+# ---------------- CSV Loader ----------------
 CSV_FILE = "ifsc.csv"
-ifsc_dict = {}
-
-def detect_encoding(file_path):
-    with open(file_path, "rb") as f:
-        result = chardet.detect(f.read())
-    logger.info(f"✅ CSV Encoding: {result['encoding']}")
-    return result["encoding"]
+df_cache = None
+bank_dict = {}
 
 def load_csv():
-    global ifsc_dict
-    encoding = detect_encoding(CSV_FILE)
-    df = pd.read_csv(CSV_FILE, encoding=encoding)
+    global df_cache, bank_dict
+    if df_cache is None:
+        # सिर्फ जरूरी columns load करना
+        usecols = ["State", "Bank", "Branch", "District", "Address", "IFSC", "MICR", "Contact"]
+        df_cache = pd.read_csv(CSV_FILE, usecols=usecols, encoding_errors="ignore")
 
-    # Normalize data
-    df["State"] = df["State"].astype(str).str.strip().str.lower()
-    df["Bank"] = df["Bank"].astype(str).str.strip().str.lower()
-    df["Branch"] = df["Branch"].astype(str).str.strip().str.lower()
+        # strip spaces
+        for col in ["State", "Bank", "Branch"]:
+            df_cache[col] = df_cache[col].astype(str).str.strip()
 
-    # Build dictionary for fast lookup
-    for _, row in df.iterrows():
-        state = row["State"]
-        bank = row["Bank"]
-        branch = row["Branch"]
+        # dictionary बनाओ (State -> Banks list)
+        bank_dict = (
+            df_cache.groupby("State")["Bank"]
+            .unique()
+            .apply(lambda x: [b.lower() for b in x])
+            .to_dict()
+        )
 
-        if state not in ifsc_dict:
-            ifsc_dict[state] = {}
-        if bank not in ifsc_dict[state]:
-            ifsc_dict[state][bank] = {}
-        ifsc_dict[state][bank][branch] = row.to_dict()
+        logger.info(f"✅ CSV loaded with {len(df_cache)} rows")
+    return df_cache
 
-    logger.info(f"✅ Dictionary built with {len(df)} records")
+# ---------------- Search ----------------
+def search_ifsc(state, bank, branch):
+    df = load_csv()
+    state, bank, branch = state.lower(), bank.lower(), branch.lower()
 
-# ------------------ Helpers ------------------
-def website_button():
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")
-    ]])
+    # bank validation dictionary से
+    if state not in [s.lower() for s in df["State"].unique()]:
+        return None, f"❌ State '{state}' नहीं मिला।"
 
-# ------------------ Bot Handlers ------------------
+    if bank not in bank_dict.get(state.title(), []):
+        return None, f"❌ Bank '{bank}' नहीं मिला।"
+
+    # branch search pandas से
+    matches = df[
+        (df["State"].str.lower() == state) &
+        (df["Bank"].str.lower() == bank) &
+        (df["Branch"].str.lower().str.contains(branch))
+    ]
+
+    if matches.empty:
+        # fuzzy branch match
+        branches = df[
+            (df["State"].str.lower() == state) &
+            (df["Bank"].str.lower() == bank)
+        ]["Branch"].str.lower().tolist()
+
+        suggestions = difflib.get_close_matches(branch, branches, n=3, cutoff=0.5)
+        if suggestions:
+            return None, f"❌ Branch नहीं मिला। शायद आपका मतलब था: {', '.join(suggestions)}"
+        else:
+            return None, "❌ कोई branch नहीं मिली।"
+
+    return matches, None
+
+# ---------------- Handlers ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+
     await update.message.reply_text(
-        "👋 Welcome to *IFSC Finder | PMetroMart*!\n\n"
-        "कृपया अपना *State* लिखें:",
+        "👋 Welcome to *IFSC Finder | PMetroMart!*\n\nकृपया अपना *State* लिखें:",
         parse_mode=ParseMode.MARKDOWN,
-        reply_markup=website_button()
+        reply_markup=reply_markup
     )
     return STATE
 
-async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "ℹ️ IFSC Finder Help\n\n"
-        "1️⃣ /start - Bot शुरू करें\n"
-        "2️⃣ State → Bank → Branch\n"
-        "➡️ फिर Bot आपको IFSC देगा।",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=website_button()
-    )
-
-async def greet_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    return await start(update, context)
-
-# --- State ---
 async def get_state(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    state = update.message.text.strip().lower()
-
-    if state not in ifsc_dict:
-        await update.message.reply_text(
-            "❌ State नहीं मिला। आप हमारी website पर भी check कर सकते हैं:",
-            reply_markup=website_button()
-        )
-        return ConversationHandler.END
-
-    context.user_data["state"] = state
+    context.user_data["state"] = update.message.text.strip()
     await update.message.reply_text("✅ State मिला! अब *Bank* का नाम भेजें:", parse_mode=ParseMode.MARKDOWN)
     return BANK
 
-# --- Bank ---
 async def get_bank(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    bank = update.message.text.strip().lower()
-    state = context.user_data.get("state")
+    context.user_data["bank"] = update.message.text.strip()
+    await update.message.reply_text("✅ Bank मिला! अब Branch का नाम भेजें:")
+    return BRANCH
 
-    if not state or state not in ifsc_dict:
-        await update.message.reply_text(
-            "❌ State error! आप हमारी website पर भी check कर सकते हैं:",
-            reply_markup=website_button()
-        )
-        return ConversationHandler.END
-
-    banks = list(ifsc_dict[state].keys())
-
-    # ✅ Exact
-    if bank in banks:
-        context.user_data["bank"] = bank
-        await update.message.reply_text("✅ Bank मिला! अब Branch का नाम भेजें:")
-        return BRANCH
-
-    # ✅ Fuzzy
-    close_match = difflib.get_close_matches(bank, banks, n=1, cutoff=0.5)
-    if close_match:
-        matched_bank = close_match[0]
-        context.user_data["bank"] = matched_bank
-        await update.message.reply_text(
-            f"🤖 आपने '{bank}' लिखा, मैंने समझा: *{matched_bank.title()}*\n\nअब Branch का नाम भेजें:",
-            parse_mode=ParseMode.MARKDOWN
-        )
-        return BRANCH
-
-    await update.message.reply_text(
-        "❌ Bank नहीं मिला। आप हमारी website पर भी check कर सकते हैं:",
-        reply_markup=website_button()
-    )
-    return ConversationHandler.END
-
-# --- Branch ---
 async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    branch = update.message.text.strip().lower()
+    branch = update.message.text.strip()
     state, bank = context.user_data.get("state"), context.user_data.get("bank")
 
     await context.bot.send_chat_action(chat_id=update.effective_chat.id, action=ChatAction.TYPING)
 
     async def process():
-        branches = ifsc_dict.get(state, {}).get(bank, {})
+        results, error = search_ifsc(state, bank, branch)
 
-        if not branches:
-            await update.message.reply_text(
-                "❌ Branch नहीं मिला। आप हमारी website पर भी check कर सकते हैं:",
-                reply_markup=website_button()
-            )
-            return
-
-        # ✅ Exact
-        if branch in branches:
-            row = branches[branch]
-            msg = (
-                f"🏦 *Bank:* {row['Bank'].title()}\n"
-                f"🌍 *State:* {row['State'].title()}\n"
-                f"🏙 *District:* {row['District']}\n"
-                f"🏢 *Branch:* {row['Branch'].title()}\n"
-                f"📌 *Address:* {row['Address']}\n"
-                f"🔑 *IFSC:* `{row['IFSC']}`\n"
-                f"💳 *MICR:* {row['MICR']}\n"
-                f"📞 *Contact:* {row['Contact']}"
-            )
-            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-            return
-
-        # ✅ Fuzzy
-        close_match = difflib.get_close_matches(branch, list(branches.keys()), n=1, cutoff=0.5)
-        if close_match:
-            matched_branch = close_match[0]
-            row = branches[matched_branch]
-            msg = (
-                f"🤖 आपने '{branch}' लिखा, मैंने समझा: *{matched_branch.title()}*\n\n"
-                f"🏦 *Bank:* {row['Bank'].title()}\n"
-                f"🌍 *State:* {row['State'].title()}\n"
-                f"🏙 *District:* {row['District']}\n"
-                f"🏢 *Branch:* {row['Branch'].title()}\n"
-                f"📌 *Address:* {row['Address']}\n"
-                f"🔑 *IFSC:* `{row['IFSC']}`\n"
-                f"💳 *MICR:* {row['MICR']}\n"
-                f"📞 *Contact:* {row['Contact']}"
-            )
-            await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
-            return
-
-        await update.message.reply_text(
-            "❌ कोई result नहीं मिला। आप हमारी website पर भी check कर सकते हैं:",
-            reply_markup=website_button()
-        )
+        if error:
+            keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+            await update.message.reply_text(error, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            for _, row in results.iterrows():
+                msg = (
+                    f"🏦 *Bank:* {row['Bank']}\n"
+                    f"🌍 *State:* {row['State']}\n"
+                    f"🏙 *District:* {row['District']}\n"
+                    f"🏢 *Branch:* {row['Branch']}\n"
+                    f"📌 *Address:* {row['Address']}\n"
+                    f"🔑 *IFSC:* `{row['IFSC']}`\n"
+                    f"💳 *MICR:* {row['MICR']}\n"
+                    f"📞 *Contact:* {row['Contact']}"
+                )
+                await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
     try:
-        await asyncio.wait_for(process(), timeout=60)
+        await asyncio.wait_for(process(), timeout=40)
     except asyncio.TimeoutError:
+        keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
         await update.message.reply_text(
-            "⌛ Result delay हो गया।\n👉 आप हमारी website पर भी check कर सकते हैं:",
-            reply_markup=website_button()
+            "⌛ Search delay हो गया। कृपया website पर चेक करें।",
+            reply_markup=InlineKeyboardMarkup(keyboard)
         )
 
     return ConversationHandler.END
@@ -225,10 +157,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Operation cancel कर दिया गया।")
     return ConversationHandler.END
 
-# ------------------ Main ------------------
+# ---------------- Main ----------------
 def main():
-    load_csv()  # load dictionary
-
+    df = load_csv()  # load once
     application = Application.builder().token(TELEGRAM_TOKEN).build()
 
     conv_handler = ConversationHandler(
@@ -239,11 +170,9 @@ def main():
             BRANCH: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_branch)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
-        conversation_timeout=120,
+        conversation_timeout=60,
     )
     application.add_handler(conv_handler)
-    application.add_handler(CommandHandler("help", help_command))
-    application.add_handler(MessageHandler(filters.Regex(r'^(hi|hello|hey|namaste)$') & ~filters.COMMAND, greet_user))
 
     PORT = int(os.environ.get("PORT", 10000))
     webhook_url = f"https://{RENDER_EXTERNAL_HOSTNAME}/{TELEGRAM_TOKEN}"
