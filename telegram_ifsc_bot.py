@@ -150,7 +150,7 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("✅ Search पूरा हुआ।\n/start से दोबारा शुरू करें।")
 
     try:
-        await asyncio.wait_for(process(), timeout=25)
+        await asyncio.wait_for(process(), timeout=60)
     except asyncio.TimeoutError:
         await send_website_button(update, context)
 
