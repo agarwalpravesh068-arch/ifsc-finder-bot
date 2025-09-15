@@ -47,6 +47,8 @@ def website_button():
         [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
     )
 
+import mysql.connector  # <-- Add this import at the top
+
 # ---------------- Logging Queries ----------------
 def log_query(user, state, bank, branch, result_count):
     log_file = "queries_log.csv"
@@ -60,9 +62,40 @@ def log_query(user, state, bank, branch, result_count):
         "branch": branch,
         "results": result_count,
     }
+
+    # ✅ Save to CSV
     df_log = pd.DataFrame([log_data])
     df_log.to_csv(log_file, mode="a", header=not os.path.exists(log_file), index=False)
-    logger.info(f"📝 Query Logged: {log_data}")
+    logger.info(f"📝 Query Logged (CSV): {log_data}")
+
+    # ✅ Save to MySQL
+    try:
+        conn = mysql.connector.connect(
+            host=os.getenv("MYSQL_HOST"),
+            user=os.getenv("MYSQL_USER"),
+            password=os.getenv("MYSQL_PASSWORD"),
+            database=os.getenv("MYSQL_DB")
+        )
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO queries_log (time, user_id, username, name, state, bank, branch, results)
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+        """, (
+            log_data["time"],
+            log_data["user_id"],
+            log_data["username"],
+            log_data["name"],
+            log_data["state"],
+            log_data["bank"],
+            log_data["branch"],
+            log_data["results"],
+        ))
+        conn.commit()
+        cursor.close()
+        conn.close()
+        logger.info("✅ Query Logged in MySQL")
+    except Exception as e:
+        logger.error(f"❌ MySQL Logging Failed: {e}")
 
 # ---------------- Handlers ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
