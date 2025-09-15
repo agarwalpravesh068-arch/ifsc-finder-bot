@@ -2,3 +2,4 @@ python-telegram-bot[webhooks,job-queue]==20.3
 pandas
 python-dotenv
 chardet
+rapidfuzz
