@@ -6,7 +6,7 @@ import os
 import asyncio
 from dotenv import load_dotenv
 from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton
 from telegram.constants import ChatAction, ParseMode
 from telegram.ext import (
     Application,
@@ -130,10 +130,19 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
         df, suggestions = search_ifsc(state, bank, branch)
 
         if df.empty:
+            keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+
             if suggestions:
-                await update.message.reply_text(f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}")
+                await update.message.reply_text(
+                    f"❌ Exact result नहीं मिला।\n👉 Suggestions: {', '.join(suggestions)}",
+                    reply_markup=reply_markup
+                )
             else:
-                await update.message.reply_text("❌ कोई result नहीं मिला।")
+                await update.message.reply_text(
+                    "❌ कोई result नहीं मिला।",
+                    reply_markup=reply_markup
+                )
         else:
             for _, row in df.iterrows():
                 msg = (
@@ -152,23 +161,18 @@ async def get_branch(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         await asyncio.wait_for(process(), timeout=60)
     except asyncio.TimeoutError:
-        await send_website_button(update, context)
+        keyboard = [[InlineKeyboardButton("🌐 Visit Website", url="https://pmetromart.in/ifsc/")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(
+            "⌛ Search delay हो गया।\n👉 आप हमारी website पर भी चेक कर सकते हो:",
+            reply_markup=reply_markup
+        )
 
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await send_website_button(update, context)
+    await update.message.reply_text("❌ Operation cancel कर दिया गया।")
     return ConversationHandler.END
-
-async def send_website_button(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton("🌐 हमारी Website पर जाएं", url="https://pmetromart.in/ifsc/")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    if update and update.effective_chat:
-        await context.bot.send_message(
-            chat_id=update.effective_chat.id,
-            text="⌛ Search fail हुआ है।\n👉 हमारी website से भी check करें:",
-            reply_markup=reply_markup
-        )
 
 # ------------------ Main ------------------
 def main():
