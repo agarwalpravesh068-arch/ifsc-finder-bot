@@ -99,13 +99,22 @@ def log_query(user, state, bank, branch, result_count):
 
 # ---------------- Handlers ----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Welcome to *IFSC Finder | PMetroMart*!\nकृपया अपना *STATE* लिखें:",
-        parse_mode="Markdown",
-        reply_markup=website_button()
-    )
-    return STATE
+    user = update.effective_user
+    name = user.first_name if user and user.first_name else "User"
 
+    welcome_msg = (
+        f"👋 Welcome *{name}* to IFSC Finder | PMetroMart!\n\n"
+        "🔍 *How to use this bot:*\n"
+        "1️⃣ Enter your *State* name (e.g., Delhi)\n"
+        "2️⃣ Enter your *Bank* name (e.g., SBI or HDFC)\n"
+        "3️⃣ Enter your *Branch* name (e.g., Connaught Place)\n\n"
+        "✅ Bot will instantly show you IFSC, MICR, Address, Contact details.\n\n"
+        "🌐 You can also visit our website: [PMetroMart IFSC Finder](https://pmetromart.in/ifsc/)\n\n"
+        "➡️ Start by typing your *State* now 👇"
+    )
+
+    await update.message.reply_text(welcome_msg, parse_mode="Markdown", reply_markup=website_button())
+    return STATE
 async def state_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_state = update.message.text.strip().upper()
     match = process.extractOne(user_state, states, scorer=fuzz.WRatio)
