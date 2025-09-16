@@ -77,8 +77,8 @@ def log_query(user, state, bank, branch, result_count):
             host=os.getenv("MYSQL_HOST"),
             user=os.getenv("MYSQL_USER"),
             password=os.getenv("MYSQL_PASSWORD"),
-            database=os.getenv("MYSQL_DB")
-port=3306
+            database=os.getenv("MYSQL_DB"),
+            port=3306
         )
         cursor = conn.cursor()
         cursor.execute("""
