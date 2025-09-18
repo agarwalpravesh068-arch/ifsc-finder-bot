@@ -223,17 +223,6 @@ def main():
 
     application = Application.builder().token(token).build()
 
-# ✅ Custom menu set karein (Manage Bot aur Create Poll hide ho jayenge)
-    async def set_commands(app):
-        from telegram import BotCommand
-        commands = [
-            BotCommand("start", "Bot shuru karein"),
-            BotCommand("help", "Help aur commands ki list"),
-        ]
-        await app.bot.set_my_commands(commands)
-
-    application.post_init = set_commands
-
     conv_handler = ConversationHandler(
         entry_points=[CommandHandler("start", start)],
         states={
